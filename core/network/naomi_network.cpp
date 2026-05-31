@@ -88,7 +88,12 @@ bool NaomiNetwork::startNetwork()
 	if (config::ActAsServer)
 	{
 		enableNetworkBroadcast(true);
-		const auto timeout = seconds(20);
+		// DOC (Derby Owners Club) links up to 8 satellites; Flycast's start trigger was
+		// hardcoded to 4 (the original "FIXME need 8 for DOC"). Wait for 8 on DOC and
+		// allow more time to bring up all the windows.
+		const bool derby = settings.content.gameId.substr(0, 6) == " DERBY";
+		const size_t targetSlaves = derby ? 8 : 4;
+		const auto timeout = seconds(derby ? 40 : 20);
 		NOTICE_LOG(NETWORK, "Waiting for slave connections");
 		steady_clock::time_point start_time = steady_clock::now();
 
@@ -109,7 +114,7 @@ bool NaomiNetwork::startNetwork()
 
 			poll();
 
-			if (slaves.size() == 4 || (_startNow && !slaves.empty()))	// FIXME need 8 for DOC
+			if (slaves.size() == targetSlaves || (_startNow && !slaves.empty()))
 				break;
 			std::this_thread::sleep_for(milliseconds(20));
 		}
