@@ -20,8 +20,11 @@
 #include "dsp.h"
 #include "sgc_if.h"
 #include "aica.h"
+#include "oslib/oslib.h"
+#include <nowide/cstdio.hpp>
 
 #include <ctime>
+#include <string>
 
 namespace aica
 {
@@ -194,10 +197,61 @@ static int DreamcastSecond(int tag, int cycles, int jitter, void *arg)
 	return SH4_MAIN_CLOCK;
 }
 
+// --- DOC "battery": persist the Naomi RTC across runs ------------------------
+// Real Naomi cabinets keep the RTC running off a 2032 battery while powered down,
+// so time-driven game state (e.g. Derby Owners Club's race program/season) resumes
+// on the next power-up. Flycast reseeds the RTC from the host clock every boot,
+// which behaves like a DEAD battery (the program always restarts at the beginning).
+// For an arcade master we save RealTimeClock to a per-game .rtc file and restore it
+// on boot, giving Flycast a working battery. No-op for slaves, netplay and consoles.
+static bool rtcPersistEnabled()
+{
+	return settings.platform.isArcade() && !config::GGPOEnable
+		&& !settings.naomi.slave && !settings.naomi.drivingSimSlave;
+}
+static std::string getRtcSavePath()
+{
+	return hostfs::getArcadeFlashPath() + ".rtc";
+}
+void saveRtc()
+{
+	if (!rtcPersistEnabled())
+		return;
+	std::string path = getRtcSavePath();
+	FILE *fp = nowide::fopen(path.c_str(), "wb");
+	if (fp == nullptr)
+	{
+		WARN_LOG(AICA, "Can't create RTC file %s", path.c_str());
+		return;
+	}
+	u32 v = RealTimeClock;
+	if (fwrite(&v, sizeof(v), 1, fp) != 1)
+		WARN_LOG(AICA, "Truncated write to RTC file %s", path.c_str());
+	fclose(fp);
+}
+static void loadRtc()
+{
+	if (!rtcPersistEnabled())
+		return;
+	std::string path = getRtcSavePath();
+	FILE *fp = nowide::fopen(path.c_str(), "rb");
+	if (fp == nullptr)
+		return;
+	u32 v = 0;
+	bool ok = fread(&v, sizeof(v), 1, fp) == 1;
+	fclose(fp);
+	if (ok && v != 0)
+	{
+		RealTimeClock = v;
+		INFO_LOG(AICA, "Restored Naomi RTC from %s", path.c_str());
+	}
+}
+
 //Init/res/term
 void initRtc()
 {
 	RealTimeClock = GetRTC_now();
+	loadRtc();		// arcade master: restore the battery-backed clock if present
 	if (rtc_schid == -1)
 		rtc_schid = sh4_sched_register(0, &DreamcastSecond);
 }

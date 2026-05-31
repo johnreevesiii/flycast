@@ -22,6 +22,7 @@ void deserialize(Deserializer& deser);
 void initRtc();
 void resetRtc(bool hard);
 void termRtc();
+void saveRtc();
 
 void setMidiReceiver(void (*handler)(u8 data));
 void midiSend(u8 data);

@@ -321,6 +321,7 @@ void saveFiles()
 		sys_nvmem->Save(getArcadeFlashPath());
 	if (settings.platform.isAtomiswave())
 		((WritableChip *)sys_rom)->Save(hostfs::getArcadeFlashPath() + ".nvmem2");
+	aica::saveRtc();	// persist the Naomi RTC ("battery") alongside nvmem
 }
 
 bool loadHle()
