@@ -19,13 +19,13 @@
 #include "naomi_network.h"
 #include "hw/naomi/naomi_flashrom.h"
 #include "cfg/option.h"
-#include "cfg/cfg.h"
 #include "stdclass.h"
 #include "oslib/oslib.h"
 #include "oslib/i18n.h"
 using namespace i18n;
 
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 
 NaomiNetwork naomiNetwork;
@@ -86,12 +86,14 @@ bool NaomiNetwork::startNetwork()
 
 	using namespace std::chrono;
 
-	// DOC Solo: when DerbySoloNodes > 0, a single Derby master + one real satellite
-	// can present itself to the game as DerbySoloNodes total nodes (5 = "4 satellites",
+	// DOC Solo: when the DOC_SOLO_NODES env var > 0, a single Derby master + one real
+	// satellite can present itself to the game as that many total nodes (5 = "4 satellites",
 	// 9 = "8 satellites"). The extra slots read as vacant stations (CPU horses).
-	// Stock behavior is fully preserved when the flag is 0.
+	// Read from the environment (not config) so it links identically in standalone and
+	// libretro builds. Stock behavior is fully preserved when unset/0.
 	const bool derbySolo = settings.content.gameId.substr(0, 6) == " DERBY";
-	const int soloNodes = derbySolo ? config::loadInt("network", "DerbySoloNodes", 0) : 0;
+	const char *soloEnv = derbySolo ? std::getenv("DOC_SOLO_NODES") : nullptr;
+	const int soloNodes = soloEnv != nullptr ? atoi(soloEnv) : 0;
 
 	if (config::ActAsServer)
 	{
