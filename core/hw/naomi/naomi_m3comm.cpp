@@ -26,6 +26,7 @@
 //
 #include "naomi_m3comm.h"
 #include "naomi_regs.h"
+#include "doc_solo_horses.h"
 #include "hw/holly/sb.h"
 #include "hw/sh4/sh4_mem.h"
 #include "network/naomi_network.h"
@@ -146,12 +147,17 @@ bool NaomiM3Comm::receiveNetwork()
 	//   DOC_SOLO_FILL=empty -> keep each phantom slot's header/state/registration markers
 	//                          (0x00-0x5F) but blank the horse record (0x60+), so the master
 	//                          sees a present, ready, card-less station and CPU-fills the gate.
+	//   DOC_SOLO_FILL=horses-> inject a distinct REAL CPU horse record (captured from a genuine
+	//                          8-satellite ring) into each phantom slot, so the master assembles
+	//                          a full distinct field. Requires 8-sat mode (slot_size 0x240,
+	//                          i.e. DOC_SOLO_NODES=9). RX0 (real satellite) and the master slot
+	//                          are left untouched.
 	static int fillMode = -2;	// -2 = uninitialised
 	if (fillMode == -2) {
 		const char *e = std::getenv("DOC_SOLO_FILL");
 		fillMode = (e == nullptr) ? 0
 				: (!strcmp(e, "clone") ? 1 : (!strcmp(e, "idle") ? 2
-				: (!strcmp(e, "empty") ? 3 : 0)));
+				: (!strcmp(e, "empty") ? 3 : (!strcmp(e, "horses") ? 4 : 0))));
 	}
 	if (fillMode != 0 && slot_id == 0 && slot_count > 2)
 	{
@@ -164,6 +170,12 @@ bool NaomiM3Comm::receiveNetwork()
 			else if (fillMode == 3) {
 				memcpy(slot, rx0, HORSE_REC);				// keep header + registration markers
 				memset(slot + HORSE_REC, 0, slot_size - HORSE_REC);	// blank the horse record
+			}
+			else if (fillMode == 4) {
+				// inject a real captured CPU horse into phantom slots 1..7 (8-sat layout only)
+				if (slot_size == 0x240 && n >= 1 && n <= 7)
+					memcpy(slot, docSoloHorses[n - 1], 0x240);
+				// otherwise leave the slot as received (don't touch master/extra slots)
 			}
 			else
 				memset(slot, 0, slot_size);
