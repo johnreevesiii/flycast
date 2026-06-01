@@ -35,6 +35,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 
@@ -134,6 +136,30 @@ bool NaomiM3Comm::receiveNetwork()
 
 	*(u16*)&comm_ram[6] = swap16(packetNumber);
 	memcpy(&comm_ram[0x100 + slot_size], buf.get(), packet_size);
+
+	// DOC Solo round 3: with one real satellite, the ring echo smears the two real
+	// boards across all RX slots (cloning). On the master, replace the phantom
+	// satellite slots (RX1..RXn) with clean per-node data so the master sees distinct
+	// stations. RX0 is the real satellite and is left untouched.
+	//   DOC_SOLO_FILL=idle  -> zero the phantom slots (empty station -> master CPU-fills)
+	//   DOC_SOLO_FILL=clone -> copy the real satellite slot into the phantom slots
+	static int fillMode = -2;	// -2 = uninitialised
+	if (fillMode == -2) {
+		const char *e = std::getenv("DOC_SOLO_FILL");
+		fillMode = (e == nullptr) ? 0
+				: (!strcmp(e, "clone") ? 1 : (!strcmp(e, "idle") ? 2 : 0));
+	}
+	if (fillMode != 0 && slot_id == 0 && slot_count > 2)
+	{
+		const u8 *rx0 = &comm_ram[0x100 + slot_size];	// real satellite slot
+		for (int n = 1; n < slot_count; n++) {
+			u8 *slot = &comm_ram[0x100 + slot_size + n * slot_size];
+			if (fillMode == 1)
+				memcpy(slot, rx0, slot_size);
+			else
+				memset(slot, 0, slot_size);
+		}
+	}
 
 	return true;
 }
