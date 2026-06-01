@@ -19,6 +19,7 @@
 #include "naomi_network.h"
 #include "hw/naomi/naomi_flashrom.h"
 #include "cfg/option.h"
+#include "cfg/cfg.h"
 #include "stdclass.h"
 #include "oslib/oslib.h"
 #include "oslib/i18n.h"
@@ -85,6 +86,13 @@ bool NaomiNetwork::startNetwork()
 
 	using namespace std::chrono;
 
+	// DOC Solo: when DerbySoloNodes > 0, a single Derby master + one real satellite
+	// can present itself to the game as DerbySoloNodes total nodes (5 = "4 satellites",
+	// 9 = "8 satellites"). The extra slots read as vacant stations (CPU horses).
+	// Stock behavior is fully preserved when the flag is 0.
+	const bool derbySolo = settings.content.gameId.substr(0, 6) == " DERBY";
+	const int soloNodes = derbySolo ? config::loadInt("network", "DerbySoloNodes", 0) : 0;
+
 	if (config::ActAsServer)
 	{
 		enableNetworkBroadcast(true);
@@ -111,6 +119,9 @@ bool NaomiNetwork::startNetwork()
 
 			if (slaves.size() == 4 || (_startNow && !slaves.empty()))	// FIXME need 8 for DOC
 				break;
+			// DOC Solo: proceed as soon as the single real satellite has joined
+			if (soloNodes > 0 && !slaves.empty())
+				break;
 			std::this_thread::sleep_for(milliseconds(20));
 		}
 		enableNetworkBroadcast(false);
@@ -119,6 +130,12 @@ bool NaomiNetwork::startNetwork()
 			NOTICE_LOG(NETWORK, "Master starting: %zd slaves", slaves.size());
 			_startNow = true;
 			slotCount = slaves.size() + 1;
+			if (soloNodes > 0)
+			{
+				slotCount = soloNodes;
+				NOTICE_LOG(NETWORK, "DOC Solo: presenting %d total nodes with %zd real slave(s)",
+						slotCount, slaves.size());
+			}
 			Packet packet(Start);
 			packet.start.nodeCount = slotCount;
 			for (auto& slave : slaves)
