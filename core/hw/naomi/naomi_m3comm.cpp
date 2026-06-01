@@ -33,8 +33,10 @@
 #include "oslib/oslib.h"
 #include "oslib/i18n.h"
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
+#include <string>
 
 constexpr u16 COMM_CTRL_CPU_RAM = 1 << 0;
 constexpr u16 COMM_CTRL_RESET = 1 << 5;		// rising edge
@@ -60,6 +62,20 @@ static inline u16 swap16(u16 w)
 	return (w >> 8) | (w << 8);
 }
 #endif
+
+// DOC ring monitor: compact hex of a memory region for the log
+static std::string hexDump(const u8 *p, u32 len)
+{
+	static const char *hx = "0123456789abcdef";
+	std::string s;
+	s.reserve(len * 3);
+	for (u32 i = 0; i < len; i++) {
+		s += hx[p[i] >> 4];
+		s += hx[p[i] & 0xf];
+		s += ' ';
+	}
+	return s;
+}
 
 static void vblankCallback(Event event, void *param) {
 	((NaomiM3Comm *)param)->vblank();
@@ -186,6 +202,9 @@ void NaomiM3Comm::connectedState()
 
 	comm_status1 = 0xff01;	// But 1 at connect time before f000 is read
 	comm_status2 = (slotCount << 8) | slot_id;
+
+	NOTICE_LOG(NETWORK, "[DOCSOLO] connectedState: slot_id=%d slot_count=%d slotCount(reported)=%d slot_size=0x%x totalnode=0x%x",
+			slot_id, slot_count, slotCount, slot_size, swap16(stat.totalnode));
 }
 
 void NaomiM3Comm::WriteMem(u32 address, u32 data, u32 size)
@@ -296,6 +315,33 @@ void NaomiM3Comm::vblank()
 		if (!received)
 			INFO_LOG(NETWORK, "No data received");
 		sendNetwork();
+
+		// DOC ring monitor: dump the FULL comm-RAM slot layout in 240-byte chunks
+		// (avoids the logger's ~1070-char line truncation) every ~600 frames. With 8
+		// real satellites every node slot is genuinely populated -- this is the
+		// ground-truth reference for a fully-filled ring.
+		static u32 dumpFrame = 0;
+		if ((dumpFrame++ % 600) == 0 && slot_count > 0)
+		{
+			const u32 ss = swap16(*(u16*)&m68k_ram[0x204]);
+			NOTICE_LOG(NETWORK, "[DOCSOLO] frame=%u slot_id=%d slot_count=%d slot_size=0x%x hdr: %s",
+					dumpFrame - 1, slot_id, slot_count, ss, hexDump(&comm_ram[0], 32).c_str());
+			if (ss > 0 && ss <= 0x400)
+			{
+				for (int n = -1; n < slot_count; n++) {
+					const u32 base = (n < 0) ? 0x100 : (0x100 + ss + n * ss);
+					if (base + ss >= 128_KB)
+						continue;
+					for (u32 off = 0; off < ss; off += 240) {
+						const u32 clen = std::min<u32>(240, ss - off);
+						if (n < 0)
+							NOTICE_LOG(NETWORK, "[DOCSOLO]   TX  +%03x: %s", off, hexDump(&comm_ram[base + off], clen).c_str());
+						else
+							NOTICE_LOG(NETWORK, "[DOCSOLO]   RX%d +%03x: %s", n, off, hexDump(&comm_ram[base + off], clen).c_str());
+					}
+				}
+			}
+		}
 	} catch (const FlycastException& e) {
 		comm_status1 = 0;
 		comm_status2 = 0;
