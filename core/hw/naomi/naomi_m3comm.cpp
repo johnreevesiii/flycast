@@ -77,6 +77,17 @@ static std::string hexDump(const u8 *p, u32 len)
 	return s;
 }
 
+// DOC Solo instrumentation: ASCII rendering (printable bytes, else '.') so WE
+// horse names (ASCII) are readable straight from the log.
+static std::string asciiDump(const u8 *p, u32 len)
+{
+	std::string s;
+	s.reserve(len);
+	for (u32 i = 0; i < len; i++)
+		s += (p[i] >= 0x20 && p[i] < 0x7f) ? (char)p[i] : '.';
+	return s;
+}
+
 static void vblankCallback(Event event, void *param) {
 	((NaomiM3Comm *)param)->vblank();
 }
@@ -316,20 +327,26 @@ void NaomiM3Comm::vblank()
 			INFO_LOG(NETWORK, "No data received");
 		sendNetwork();
 
-		// DOC Solo instrumentation: dump the comm-RAM slot layout every ~180 frames
+		// DOC Solo instrumentation: dump the FULL comm-RAM slot layout (hex + ASCII)
+		// every ~600 frames. ASCII makes WE horse names readable straight from the log.
+		// slot_id 0 = master (its TX slot = race state); slot_id 1 = real satellite
+		// (its TX slot = horse entry). In the master's view, RX0 = the satellite's TX.
 		static u32 dumpFrame = 0;
-		if ((dumpFrame++ % 180) == 0 && slot_count > 0)
+		if ((dumpFrame++ % 600) == 0 && slot_count > 0)
 		{
 			const u32 slot_size = swap16(*(u16*)&m68k_ram[0x204]);
-			NOTICE_LOG(NETWORK, "[DOCSOLO] frame=%u slot_count=%d slot_size=0x%x hdr: %s",
-					dumpFrame - 1, slot_count, slot_size, hexDump(&comm_ram[0], 32).c_str());
-			if (slot_size > 0 && slot_size <= 0x800)
+			NOTICE_LOG(NETWORK, "[DOCSOLO] frame=%u slot_id=%d slot_count=%d slot_size=0x%x hdr: %s",
+					dumpFrame - 1, slot_id, slot_count, slot_size, hexDump(&comm_ram[0], 32).c_str());
+			if (slot_size > 0 && slot_size <= 0x1000)
 			{
-				NOTICE_LOG(NETWORK, "[DOCSOLO]   TX  @0x100: %s", hexDump(&comm_ram[0x100], std::min<u32>(slot_size, 64)).c_str());
+				NOTICE_LOG(NETWORK, "[DOCSOLO]   TX  @0x100 hex: %s", hexDump(&comm_ram[0x100], slot_size).c_str());
+				NOTICE_LOG(NETWORK, "[DOCSOLO]   TX  @0x100 asc: %s", asciiDump(&comm_ram[0x100], slot_size).c_str());
 				for (int n = 0; n < slot_count; n++) {
 					const u32 off = 0x100 + slot_size + n * slot_size;
-					if (off + 48 < 128_KB)
-						NOTICE_LOG(NETWORK, "[DOCSOLO]   RX%d @0x%x: %s", n, off, hexDump(&comm_ram[off], std::min<u32>(slot_size, 48)).c_str());
+					if (off + slot_size >= 128_KB)
+						continue;
+					NOTICE_LOG(NETWORK, "[DOCSOLO]   RX%d @0x%x hex: %s", n, off, hexDump(&comm_ram[off], slot_size).c_str());
+					NOTICE_LOG(NETWORK, "[DOCSOLO]   RX%d @0x%x asc: %s", n, off, asciiDump(&comm_ram[off], slot_size).c_str());
 				}
 			}
 		}
