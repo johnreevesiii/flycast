@@ -141,21 +141,30 @@ bool NaomiM3Comm::receiveNetwork()
 	// boards across all RX slots (cloning). On the master, replace the phantom
 	// satellite slots (RX1..RXn) with clean per-node data so the master sees distinct
 	// stations. RX0 is the real satellite and is left untouched.
-	//   DOC_SOLO_FILL=idle  -> zero the phantom slots (empty station -> master CPU-fills)
+	//   DOC_SOLO_FILL=idle  -> zero the phantom slots (wipes identity; empties list as gate 1)
 	//   DOC_SOLO_FILL=clone -> copy the real satellite slot into the phantom slots
+	//   DOC_SOLO_FILL=empty -> keep each phantom slot's header/state/registration markers
+	//                          (0x00-0x5F) but blank the horse record (0x60+), so the master
+	//                          sees a present, ready, card-less station and CPU-fills the gate.
 	static int fillMode = -2;	// -2 = uninitialised
 	if (fillMode == -2) {
 		const char *e = std::getenv("DOC_SOLO_FILL");
 		fillMode = (e == nullptr) ? 0
-				: (!strcmp(e, "clone") ? 1 : (!strcmp(e, "idle") ? 2 : 0));
+				: (!strcmp(e, "clone") ? 1 : (!strcmp(e, "idle") ? 2
+				: (!strcmp(e, "empty") ? 3 : 0)));
 	}
 	if (fillMode != 0 && slot_id == 0 && slot_count > 2)
 	{
 		const u8 *rx0 = &comm_ram[0x100 + slot_size];	// real satellite slot
+		constexpr u32 HORSE_REC = 0x60;					// horse records start ~0x60
 		for (int n = 1; n < slot_count; n++) {
 			u8 *slot = &comm_ram[0x100 + slot_size + n * slot_size];
 			if (fillMode == 1)
 				memcpy(slot, rx0, slot_size);
+			else if (fillMode == 3) {
+				memcpy(slot, rx0, HORSE_REC);				// keep header + registration markers
+				memset(slot + HORSE_REC, 0, slot_size - HORSE_REC);	// blank the horse record
+			}
 			else
 				memset(slot, 0, slot_size);
 		}
