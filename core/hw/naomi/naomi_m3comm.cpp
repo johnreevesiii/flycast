@@ -172,9 +172,15 @@ bool NaomiM3Comm::receiveNetwork()
 				memset(slot + HORSE_REC, 0, slot_size - HORSE_REC);	// blank the horse record
 			}
 			else if (fillMode == 4) {
-				// inject a real captured CPU horse into phantom slots 1..7 (8-sat layout only)
-				if (slot_size == 0x240 && n >= 1 && n <= 7)
-					memcpy(slot, docSoloHorses[n - 1], 0x240);
+				// inject ONLY the constant identity bytes of a real captured CPU horse into
+				// phantom slots 1..7 (8-sat layout); leave the live/position bytes (mask=1) to
+				// the sim so the injected horses actually race instead of freezing.
+				if (slot_size == 0x240 && n >= 1 && n <= 7) {
+					const u8 *rec = docSoloHorses[n - 1];
+					for (u32 i = 0; i < 0x240; i++)
+						if (!docSoloDynamic[i])
+							slot[i] = rec[i];
+				}
 				// otherwise leave the slot as received (don't touch master/extra slots)
 			}
 			else
